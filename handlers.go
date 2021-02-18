@@ -15,6 +15,7 @@ import (
 
 	"github.com/gorilla/mux"
 	"github.com/gorilla/websocket"
+	lorawan "github.com/shaunybear/lorawango"
 )
 
 const (
@@ -39,6 +40,7 @@ type DiscoveryHandler struct {
 }
 
 func (dh DiscoveryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	var response DiscoveryResponse
 
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
@@ -64,13 +66,13 @@ func (dh DiscoveryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Extract EUI from the request
-	var eui uint64
 	for k, v := range msg {
 		switch k {
 		case "router", "Router":
-			eui, err = parseEUI(v)
-			if err != nil {
-				response := DiscoveryResponse{Error: "Missing router field"}
+			var ok bool
+			response.Router, ok = v.(string)
+			if !ok {
+				response.Error = "Missing router field"
 				conn.WriteJSON(&response)
 				dh.Env.Log.Warn().Err(err).Msg("discovery request get eui")
 				return
@@ -81,14 +83,13 @@ func (dh DiscoveryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	station, ok := dh.Env.Repo.GetStation(eui)
-	if !ok {
-		return
+	station, err := dh.Env.Repo.GetStation(response.Router)
+	if err == nil {
+		response, err = station.GetDiscoveryResponse()
 	}
 
-	response, err := station.GetDiscoveryResponse()
 	if err != nil {
-		return
+		response.Error = err.Error()
 	}
 
 	// Write response
@@ -112,23 +113,17 @@ type StationHandler struct {
 }
 
 func (sh StationHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+
 	vars := mux.Vars(r)
-	v, ok := vars["eui"]
+	eui, ok := vars["eui"]
 	if !ok {
 		sh.Env.Log.Debug().
 			Str("uri", r.RequestURI).
 			Msg("malformed muxs request uri")
 	}
 
-	eui, err := parseEUI(v)
+	station, err := sh.Env.Repo.GetStation(eui)
 	if err != nil {
-		sh.Env.Log.Debug().
-			Err(err).
-			Msg("Parse EUI failed")
-	}
-
-	station, ok := sh.Env.Repo.GetStation(eui)
-	if !ok {
 		return
 	}
 
@@ -137,15 +132,16 @@ func (sh StationHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		sh.Env.Log.Warn().
 			Err(err).
-			Uint64("eui", eui).
+			Str("eui", eui).
 			Msg("websocket upgrade failed")
 		return
 	}
 	defer ws.Close()
 
 	// Start station protocol runner
+	gwEUI, _ := lorawan.NewEUI(eui)
 	ch := connHandler{
-		eui:     eui,
+		eui:     gwEUI.Uint64(),
 		station: station,
 		env:     sh.Env,
 		ws:      ws,

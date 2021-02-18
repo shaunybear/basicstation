@@ -19,7 +19,7 @@ type Station interface {
 
 // Repository interface ..
 type Repository interface {
-	GetStation(uint64) (Station, bool)
+	GetStation(eui string) (Station, error)
 }
 
 // Handler interface ...
@@ -56,8 +56,8 @@ type Version struct {
 type UpInfo struct {
 	DR   uint8
 	Freq uint32
-	RSSI float32   `json:"rssi"`
-	SNR  float32   `json:"snr"`
+	RSSI float64   `json:"rssi"`
+	SNR  float64   `json:"snr"`
 	RCtx RxContext `mapstructure:",squash"`
 }
 
@@ -111,7 +111,7 @@ func (uplink Uplink) Read(b []byte) (int, error) {
 type DnTxed struct {
 	DIID   int64     `json:"diid"`
 	DevEUI uint64    `json:"DevEui"`
-	TXTime float32   `json:"txtime"`
+	TXTime float64   `json:"txtime"`
 	RCtx   RxContext `mapstructure:",squash"`
 }
 
@@ -182,7 +182,7 @@ func (u UnsupportedMsgType) Error() string {
 	return fmt.Sprintf("unsupported message type: %s", u.mtype)
 }
 
-// Decode decodes a basic station message
+// decode decodes a basic station message
 func decode(r io.Reader) (interface{}, error) {
 	input := map[string]interface{}{}
 	var output interface{}

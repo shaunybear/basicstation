@@ -1,4 +1,4 @@
-package basicstation
+package test
 
 import (
 	"context"
@@ -11,7 +11,7 @@ import (
 )
 
 // ForwarderStub implements basic station functionality for testing
-type ForwarderStub struct {
+type MockGW struct {
 	EUI                   uint64
 	TCURI                 string
 	Version               Version
@@ -26,12 +26,12 @@ type ForwarderStub struct {
 }
 
 // DoDiscovery performs discovery transaction
-func (f *ForwarderStub) DoDiscovery() (err error) {
+func (gw *MockGW) DoDiscovery() (err error) {
 
-	uri := f.TCURI + "/router-info"
+	uri := gw.TCURI + "/router-info"
 	conn, _, err := websocket.DefaultDialer.Dial(uri, nil)
 	if err != nil {
-		f.Log.Error().
+		gw.Log.Error().
 			Str("service", "discovery").
 			Str("tcuri", uri).
 			Err(err).
@@ -41,27 +41,27 @@ func (f *ForwarderStub) DoDiscovery() (err error) {
 	defer conn.Close()
 
 	// Initialize discovery request
-	if f.DReq == nil {
-		f.DReq = map[string]string{"Router": toString(f.EUI)}
+	if gw.DReq == nil {
+		gw.DReq = map[string]string{"Router": toString(f.EUI)}
 	}
 
 	// Configure request write delay to test listener read timeout
-	if f.DiscoveryRequestWait != 0 {
-		f.Log.Debug().
+	if gw.DiscoveryRequestWait != 0 {
+		gw.Log.Debug().
 			Str("service", "discovery").
-			Msgf("Send delay=%v", f.DiscoveryRequestWait)
+			Msgf("Send delay=%v", gw.DiscoveryRequestWait)
 
 		time.Sleep(f.DiscoveryRequestWait)
 	}
 
 	// Send discovery request
-	f.Log.Debug().
+	gw.Log.Debug().
 		Str("service", "discovery").
-		Interface("request", f.DReq).
+		Interface("request", gw.DReq).
 		Msg("Sending request")
 
-	if err = conn.WriteJSON(f.DReq); err != nil {
-		f.Log.Error().
+	if err = conn.WriteJSON(gw.DReq); err != nil {
+		gw.Log.Error().
 			Str("service", "discovery").
 			Err(err).
 			Msg("write request failed")
@@ -70,12 +70,12 @@ func (f *ForwarderStub) DoDiscovery() (err error) {
 	}
 
 	// Read response
-	f.Log.Debug().
+	gw.Log.Debug().
 		Str("service", "discovery").
 		Msg("Reading response")
 
 	if err = conn.ReadJSON(&f.DResp); err != nil {
-		f.Log.Error().
+		gw.Log.Error().
 			Str("service", "discovery").
 			Err(err).
 			Msg("Read response failed")
@@ -83,12 +83,12 @@ func (f *ForwarderStub) DoDiscovery() (err error) {
 		return
 	}
 
-	f.Log.Debug().
+	gw.Log.Debug().
 		Str("service", "discovery").
-		Str("Router", f.DResp.Router).
-		Str("MUXS", f.DResp.MUXS).
-		Str("URI", f.DResp.URI).
-		Str("Error", f.DResp.Error).
+		Str("Router", gw.DResp.Router).
+		Str("MUXS", gw.DResp.MUXS).
+		Str("URI", gw.DResp.URI).
+		Str("Error", gw.DResp.Error).
 		Msg("Discovery response")
 
 	return err
@@ -96,20 +96,20 @@ func (f *ForwarderStub) DoDiscovery() (err error) {
 
 // DoMuxsConnect performs initial mux connection consisting
 // of sending version info and receiving the router configuration
-func (f *ForwarderStub) DoMuxsConnect() (err error) {
+func (gw *MockGW) DoMuxsConnect() (err error) {
 
-	url := f.DResp.URI
+	url := gw.DResp.URI
 
 	websocket.DefaultDialer.HandshakeTimeout = 5 * time.Second
 
-	f.Log.Debug().
+	gw.Log.Debug().
 		Str("service", "muxs").
 		Str("url", url).
 		Msg("Dialing network")
 
 	conn, r, err := websocket.DefaultDialer.Dial(url, nil)
 	if err != nil {
-		f.Log.Error().
+		gw.Log.Error().
 			Str("service", "muxs").
 			Str("url", url).
 			Err(err).
@@ -118,8 +118,8 @@ func (f *ForwarderStub) DoMuxsConnect() (err error) {
 		return err
 	}
 
-	if r.StatusCode == http.StatusUnauthorized {
-		f.Log.Error().
+	if gw.StatusCode == http.StatusUnauthorized {
+		gw.Log.Error().
 			Str("service", "muxs").
 			Str("status", r.Status).
 			Msg("connect response status != OK")
@@ -128,40 +128,40 @@ func (f *ForwarderStub) DoMuxsConnect() (err error) {
 	}
 
 	// Configure version write delay to test listener read timeout
-	if f.MuxsVersionWait != 0 {
-		f.Log.Debug().
+	if gw.MuxsVersionWait != 0 {
+		gw.Log.Debug().
 			Str("service", "muxs").
 			Msgf("Send version delay=%v", f.MuxsVersionWait)
 		time.Sleep(f.MuxsVersionWait)
 	}
 
-	f.conn = conn
+	gw.conn = conn
 
 	// Send version
-	f.Log.Debug().
+	gw.Log.Debug().
 		Str("service", "muxs").
 		Msg("Sending version")
 
-	f.Version.MsgType = "version"
+	gw.Version.MsgType = "version"
 	err = conn.WriteJSON(&f.Version)
 	if err != nil {
-		f.Log.Error().
+		gw.Log.Error().
 			Str("service", "muxs").
 			Err(err).
-			Interface("Version", f.Version).
+			Interface("Version", gw.Version).
 			Msg("Encode version")
 
 		return err
 	}
 
 	// Read router configuration
-	f.Log.Debug().
+	gw.Log.Debug().
 		Str("service", "muxs").
 		Msg("Read router configuration")
 
-	err = f.conn.ReadJSON(&f.RtrConf)
+	err = gw.conn.ReadJSON(&f.RtrConf)
 	if err != nil {
-		f.Log.Error().
+		gw.Log.Error().
 			Str("service", "muxs").
 			Err(err).
 			Msg("Read router configuration")
@@ -169,19 +169,19 @@ func (f *ForwarderStub) DoMuxsConnect() (err error) {
 		return err
 	}
 
-	f.Log.Debug().
+	gw.Log.Debug().
 		Str("service", "muxs").
 		Interface("rtrconf", f.RtrConf).
 		Msg("Received router configuration")
 
-	if f.MuxsWriteIdleDuration != 0 {
-		f.Log.Debug().
+	if gw.MuxsWriteIdleDuration != 0 {
+		gw.Log.Debug().
 			Str("service", "muxs").
 			Msgf("Muxs write idle duration=%s", f.MuxsWriteIdleDuration)
 		time.Sleep(f.MuxsWriteIdleDuration)
 	}
 
-	f.Log.Debug().
+	gw.Log.Debug().
 		Str("service", "muxs").
 		Msg("Done")
 
@@ -189,12 +189,12 @@ func (f *ForwarderStub) DoMuxsConnect() (err error) {
 }
 
 // ReadLoop reads messages from the endpoint connection
-func (f *ForwarderStub) ReadLoop(ctx context.Context, rxChan chan []byte) error {
+func (gw *MockGW) ReadLoop(ctx context.Context, rxChan chan []byte) error {
 	var err error
 
 	go func() {
 		for {
-			_, message, err := f.conn.ReadMessage()
+			_, message, err := gw.conn.ReadMessage()
 			if err != nil {
 				return
 			}
