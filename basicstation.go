@@ -54,8 +54,6 @@ type Version struct {
 
 // UpInfo message  present in all radio frames
 type UpInfo struct {
-	DR   uint8
-	Freq uint32
 	RSSI float64   `json:"rssi"`
 	SNR  float64   `json:"snr"`
 	RCtx RxContext `mapstructure:",squash"`
@@ -63,13 +61,15 @@ type UpInfo struct {
 
 // JoinRequest message is a parsed join request
 type JoinRequest struct {
-	MHdr     uint
+	MsgType  string `json:"msgtype"`
+	MHdr     uint8
 	JoinEUI  string `json:"JoinEui"`
 	DevEUI   string `json:"DevEui"`
-	DevNonce uint
+	DevNonce uint16
 	MIC      int32
+	DR       int
+	Freq     int
 	UpInfo   UpInfo
-	MsgType  string `json:"msgtype"`
 }
 
 // Uplink encodes an uplink frame
@@ -79,9 +79,11 @@ type Uplink struct {
 	FCtrl      uint8
 	FCnt       uint16
 	FOpts      string
-	FPort      int
+	FPort      int8
 	FRMPayload string
-	MIC        uint32
+	MIC        int32
+	DR         int
+	Freq       int
 	UpInfo     UpInfo
 	MsgType    string `json:"msgtype"`
 }

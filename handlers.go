@@ -225,7 +225,7 @@ func (ch connHandler) readText(r io.Reader) error {
 			Err(err).
 			Str("service", "muxs").
 			Uint64("eui", ch.eui).
-			Msg("muxHandler decode message failed")
+			Msg("readText decode message failed")
 
 		return err
 	}
