@@ -10,28 +10,23 @@ import (
 	"github.com/rs/zerolog"
 )
 
-// Station interface ...
-type Station interface {
+// Gateway interface ...
+type Gateway interface {
 	GetRouterConf() (RouterConf, error)
 	GetDiscoveryResponse() (DiscoveryResponse, error)
 	SetVersion(Version)
+	Receive(msg interface{})
 }
 
-// Repository interface ..
-type Repository interface {
-	GetStation(eui string) (Station, error)
-}
-
-// Handler interface ...
-type Handler interface {
-	Receive(Station, interface{})
+// GatewayDB interface ..
+type GatewayDB interface {
+	Get(eui uint64) (Gateway, error)
 }
 
 // Environment ...
 type Environment struct {
-	Repo    Repository
-	Handler Handler
-	Log     zerolog.Logger
+	DB  GatewayDB
+	Log zerolog.Logger
 }
 
 // RxContext common uplink/downlink radio fields

@@ -2,14 +2,11 @@ package basicstation
 
 import (
 	"context"
-	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
@@ -83,9 +80,14 @@ func (dh DiscoveryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	station, err := dh.Env.Repo.GetStation(response.Router)
-	if err == nil {
-		response, err = station.GetDiscoveryResponse()
+	eui, err := lorawan.NewEUI(response.Router)
+	if err != nil {
+		dh.Env.Log.Warn().Err(err).Str("eui", response.Router).Msg("parse router id failed")
+	} else {
+		gw, err := dh.Env.DB.Get(eui.Uint64())
+		if err == nil {
+			response, err = gw.GetDiscoveryResponse()
+		}
 	}
 
 	if err != nil {
@@ -107,22 +109,25 @@ func (dh DiscoveryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// StationHandler is the Basic Station connection HTTP handler
-type StationHandler struct {
+// GatewayHandler is the Basic Station connection HTTP handler
+type GatewayHandler struct {
 	Env *Environment
 }
 
-func (sh StationHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func (gh GatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	vars := mux.Vars(r)
-	eui, ok := vars["eui"]
+	v, ok := vars["eui"]
 	if !ok {
-		sh.Env.Log.Debug().
+		gh.Env.Log.Debug().
 			Str("uri", r.RequestURI).
 			Msg("malformed muxs request uri")
 	}
 
-	station, err := sh.Env.Repo.GetStation(eui)
+	// Start station protocol runner
+	eui, err := lorawan.NewEUI(v)
+
+	gw, err := gh.Env.DB.Get(eui.Uint64())
 	if err != nil {
 		return
 	}
@@ -130,51 +135,49 @@ func (sh StationHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Upgrade to websocket
 	ws, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		sh.Env.Log.Warn().
+		gh.Env.Log.Warn().
 			Err(err).
-			Str("eui", eui).
+			Str("eui", eui.String()).
 			Msg("websocket upgrade failed")
 		return
 	}
 	defer ws.Close()
 
-	// Start station protocol runner
-	gwEUI, _ := lorawan.NewEUI(eui)
-	ch := connHandler{
-		eui:     gwEUI.Uint64(),
-		station: station,
-		env:     sh.Env,
-		ws:      ws,
+	gwh := gwHandler{
+		eui: eui.Uint64(),
+		gw:  gw,
+		env: gh.Env,
+		ws:  ws,
 	}
-	ch.run()
+	gwh.run()
 }
 
-// stationHandler implements the basic station connection handler read/write functionality
-type connHandler struct {
-	eui     uint64
-	station Station
-	env     *Environment
-	ws      *websocket.Conn
+// gwHandler implements the basic station connection handler read/write functionality
+type gwHandler struct {
+	eui uint64
+	gw  Gateway
+	env *Environment
+	ws  *websocket.Conn
 }
 
-func (ch connHandler) run() error {
+func (h gwHandler) run() error {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	err := ch.readVersion(ctx)
+	err := h.readVersion(ctx)
 	if err != nil {
 		return err
 	}
 
 	// Read configuration
-	conf, err := ch.station.GetRouterConf()
+	conf, err := h.gw.GetRouterConf()
 	if err != nil {
 		return err
 	}
 
 	// Get writer
-	outbound, err := ch.ws.NextWriter(websocket.TextMessage)
+	outbound, err := h.ws.NextWriter(websocket.TextMessage)
 	if err != nil {
 		return err
 	}
@@ -189,14 +192,14 @@ func (ch connHandler) run() error {
 	outbound.Close()
 
 	// Start websocket writer goroutine
-	go ch.writer(ctx)
+	go h.writer(ctx)
 
 	// Read loop
 	for {
-		mt, inbound, err := ch.ws.NextReader()
+		mt, inbound, err := h.ws.NextReader()
 		if err != nil {
-			ch.env.Log.Debug().
-				Uint64("eui", ch.eui).
+			h.env.Log.Debug().
+				Uint64("eui", h.eui).
 				Err(err).
 				Msg("websocket next reader error")
 
@@ -205,10 +208,10 @@ func (ch connHandler) run() error {
 
 		switch mt {
 		case websocket.TextMessage:
-			ch.readText(inbound)
+			h.readText(inbound)
 		case websocket.CloseMessage:
-			ch.env.Log.Debug().
-				Uint64("eui", ch.eui).
+			h.env.Log.Debug().
+				Uint64("eui", h.eui).
 				Msg("received websocket close message")
 			return nil
 		default:
@@ -216,35 +219,35 @@ func (ch connHandler) run() error {
 	}
 }
 
-func (ch connHandler) readText(r io.Reader) error {
+func (h gwHandler) readText(r io.Reader) error {
 
 	// Read the message
 	msg, err := decode(r)
 	if err != nil {
-		ch.env.Log.Error().
+		h.env.Log.Error().
 			Err(err).
 			Str("service", "muxs").
-			Uint64("eui", ch.eui).
+			Uint64("eui", h.eui).
 			Msg("readText decode message failed")
 
 		return err
 	}
 
-	ch.env.Handler.Receive(ch.station, msg)
+	h.gw.Receive(msg)
 
 	return nil
 }
 
-func (ch connHandler) readVersion(ctx context.Context) error {
+func (h gwHandler) readVersion(ctx context.Context) error {
 	var version Version
 
 	// Set a short initial read deadline to abort the connection if version is not soon received
-	ch.ws.SetReadDeadline(time.Now().Add(5 * time.Second))
+	h.ws.SetReadDeadline(time.Now().Add(5 * time.Second))
 	// Reset read deadline to no timeout
-	defer ch.ws.SetReadDeadline(time.Time{})
+	defer h.ws.SetReadDeadline(time.Time{})
 
 	// Read version
-	_, inbound, err := ch.ws.NextReader()
+	_, inbound, err := h.ws.NextReader()
 	if err != nil {
 		return err
 	}
@@ -254,12 +257,12 @@ func (ch connHandler) readVersion(ctx context.Context) error {
 		return err
 	}
 
-	ch.station.SetVersion(version)
+	h.gw.SetVersion(version)
 
 	return nil
 }
 
-func (ch connHandler) writer(ctx context.Context) {
+func (h gwHandler) writer(ctx context.Context) {
 
 	for {
 		select {
@@ -341,53 +344,4 @@ func decodeToMap(r io.Reader) (map[string]interface{}, error) {
 	}
 
 	return nil, errors.New(msg)
-}
-
-// ParseEUI parses EUI from the input
-func parseEUI(val interface{}) (uint64, error) {
-	switch val.(type) {
-	case int:
-		return uint64(val.(int)), nil
-	case float64:
-		return uint64(val.(float64)), nil
-	case string:
-		return fromString(val.(string))
-	default:
-		return 0, fmt.Errorf("ParseEUI: %T is unsupported", val)
-	}
-}
-
-// Stringer interface implemented by EUI
-func toString(eui uint64) string {
-	return fmt.Sprintf("%016x", eui)
-}
-
-// fromString parses a EUI string
-func fromString(s string) (eui uint64, err error) {
-	var parsed uint64
-	// Try to parse as IPv6 format
-	ip := net.ParseIP("::" + s)
-	if ip != nil {
-		parsed = binary.BigEndian.Uint64(ip[8:])
-		if parsed != 0 {
-			return uint64(parsed), nil
-		}
-	}
-
-	for _, sep := range []string{"", "-", ":"} {
-		ss := strings.Replace(s, sep, "", -1)
-		if len(ss) < 16 {
-			err = fmt.Errorf("Invalid EUI format: %s", s)
-			return
-		}
-
-		// Attempt to parse the EUI from the string stripped of the current separator
-		if parsed, err = strconv.ParseUint(ss, 16, 64); err != nil {
-			continue
-		}
-
-		return uint64(parsed), nil
-	}
-
-	return
 }
