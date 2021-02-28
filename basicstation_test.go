@@ -1,60 +1,65 @@
 package basicstation
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gorilla/mux"
 	"github.com/gorilla/websocket"
+	"github.com/rs/zerolog"
 )
 
 // Repository interface ..
 
-type testStation struct {
+type testServer struct {
 	conf      RouterConf
 	discovery DiscoveryResponse
 	version   Version
+	log       zerolog.Logger
 }
 
-func (stn testStation) GetRouterConf() (RouterConf, error) {
-	return stn.conf, nil
-
+func (s testServer) GetRouterConf(gw *Gateway) error {
+	gw.RouterConf = s.conf
+	return nil
 }
 
-func (stn testStation) GetDiscoveryResponse() (DiscoveryResponse, error) {
-	return stn.discovery, nil
-
+func (s testServer) GetDiscoveryResponse(eui uint64, r *http.Request) (DiscoveryResponse, error) {
+	return s.discovery, nil
 }
 
-func (stn testStation) SetVersion(version Version) {
-	stn.version = version
+func (s testServer) NewConnection(gw *Gateway) {
+	ctx, _ := context.WithTimeout(context.Background(), 5*time.Second)
+	gw.Run(ctx, s, s.log)
+	return
 }
 
-type testRepo struct {
-	station testStation
+func (s testServer) Receive(gw *Gateway, msg interface{}) {
+	return
 }
 
-func (repo testRepo) GetStation(uint64) (Station, bool) {
-	return repo.station, true
+func (s testServer) SetVersion(eui uint64, v Version) {
+	s.version = v
+}
 
+func (s testServer) Write(m interface{}) {
 }
 
 func TestDiscoveryHandler(t *testing.T) {
 
 	tcs := []struct {
 		name    string
-		station testStation
 		message map[string]interface{}
 		reply   DiscoveryResponse
 	}{
 		{
 			name:    "with good request containing router as number",
 			message: map[string]interface{}{"router": 1},
-			station: testStation{},
 			reply: DiscoveryResponse{
 				URI:  "ws://discovery-test.com:8080/0000000000000001",
 				MUXS: "TBD",
@@ -66,11 +71,11 @@ func TestDiscoveryHandler(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 
 			// Initialize test response
-			tr := testRepo{station: tt.station}
-			tr.station.discovery = tt.reply
+			ts := testServer{}
+			ts.discovery = tt.reply
 
 			// test environment
-			env := &Environment{Repo: tr}
+			env := &Environment{Server: ts}
 
 			// discovery handler
 			h := DiscoveryHandler{Env: env}
@@ -121,13 +126,14 @@ func TestStationRouterConf(t *testing.T) {
 	for _, tt := range tcs {
 		t.Run(tt.name, func(t *testing.T) {
 
-			tr := testRepo{}
-			env := &Environment{Repo: &tr}
-			h := StationHandler{Env: env}
+			ts := testServer{}
+			env := &Environment{Server: &ts}
 
-			tr.station.conf = tt.wantConf
+			ts.conf = tt.wantConf
 
-			s, ws := newStationWSServer(t, tt.eui, h)
+			gh := GatewayHandler{Env: env}
+
+			s, ws := newStationWSServer(t, tt.eui, gh)
 			defer s.Close()
 			defer ws.Close()
 

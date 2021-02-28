@@ -1,4 +1,4 @@
-package test
+package basicstation
 
 import (
 	"context"
@@ -8,9 +8,10 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/rs/zerolog"
+	lorawan "github.com/shaunybear/lorawango"
 )
 
-// ForwarderStub implements basic station functionality for testing
+// MockGW implements basic station functionality for testing
 type MockGW struct {
 	EUI                   uint64
 	TCURI                 string
@@ -42,7 +43,8 @@ func (gw *MockGW) DoDiscovery() (err error) {
 
 	// Initialize discovery request
 	if gw.DReq == nil {
-		gw.DReq = map[string]string{"Router": toString(f.EUI)}
+		eui, _ := lorawan.NewEUI(gw.EUI)
+		gw.DReq = map[string]string{"Router": eui.String()}
 	}
 
 	// Configure request write delay to test listener read timeout
@@ -51,7 +53,7 @@ func (gw *MockGW) DoDiscovery() (err error) {
 			Str("service", "discovery").
 			Msgf("Send delay=%v", gw.DiscoveryRequestWait)
 
-		time.Sleep(f.DiscoveryRequestWait)
+		time.Sleep(gw.DiscoveryRequestWait)
 	}
 
 	// Send discovery request
@@ -74,7 +76,7 @@ func (gw *MockGW) DoDiscovery() (err error) {
 		Str("service", "discovery").
 		Msg("Reading response")
 
-	if err = conn.ReadJSON(&f.DResp); err != nil {
+	if err = conn.ReadJSON(&gw.DResp); err != nil {
 		gw.Log.Error().
 			Str("service", "discovery").
 			Err(err).
@@ -118,7 +120,7 @@ func (gw *MockGW) DoMuxsConnect() (err error) {
 		return err
 	}
 
-	if gw.StatusCode == http.StatusUnauthorized {
+	if r.StatusCode == http.StatusUnauthorized {
 		gw.Log.Error().
 			Str("service", "muxs").
 			Str("status", r.Status).
@@ -131,8 +133,8 @@ func (gw *MockGW) DoMuxsConnect() (err error) {
 	if gw.MuxsVersionWait != 0 {
 		gw.Log.Debug().
 			Str("service", "muxs").
-			Msgf("Send version delay=%v", f.MuxsVersionWait)
-		time.Sleep(f.MuxsVersionWait)
+			Msgf("Send version delay=%v", gw.MuxsVersionWait)
+		time.Sleep(gw.MuxsVersionWait)
 	}
 
 	gw.conn = conn
@@ -143,7 +145,7 @@ func (gw *MockGW) DoMuxsConnect() (err error) {
 		Msg("Sending version")
 
 	gw.Version.MsgType = "version"
-	err = conn.WriteJSON(&f.Version)
+	err = conn.WriteJSON(&gw.Version)
 	if err != nil {
 		gw.Log.Error().
 			Str("service", "muxs").
@@ -159,7 +161,7 @@ func (gw *MockGW) DoMuxsConnect() (err error) {
 		Str("service", "muxs").
 		Msg("Read router configuration")
 
-	err = gw.conn.ReadJSON(&f.RtrConf)
+	err = gw.conn.ReadJSON(&gw.RtrConf)
 	if err != nil {
 		gw.Log.Error().
 			Str("service", "muxs").
@@ -171,14 +173,14 @@ func (gw *MockGW) DoMuxsConnect() (err error) {
 
 	gw.Log.Debug().
 		Str("service", "muxs").
-		Interface("rtrconf", f.RtrConf).
+		Interface("rtrconf", gw.RtrConf).
 		Msg("Received router configuration")
 
 	if gw.MuxsWriteIdleDuration != 0 {
 		gw.Log.Debug().
 			Str("service", "muxs").
-			Msgf("Muxs write idle duration=%s", f.MuxsWriteIdleDuration)
-		time.Sleep(f.MuxsWriteIdleDuration)
+			Msgf("Muxs write idle duration=%s", gw.MuxsWriteIdleDuration)
+		time.Sleep(gw.MuxsWriteIdleDuration)
 	}
 
 	gw.Log.Debug().

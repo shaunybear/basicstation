@@ -10,23 +10,16 @@ import (
 	"github.com/rs/zerolog"
 )
 
-// Gateway interface ...
-type Gateway interface {
-	GetRouterConf() (RouterConf, error)
-	GetDiscoveryResponse() (DiscoveryResponse, error)
-	SetVersion(Version)
-	Receive(msg interface{})
-}
-
-// GatewayDB interface ..
-type GatewayDB interface {
-	Get(eui uint64) (Gateway, error)
+// DataDown message
+type DataDown struct {
+	r  io.Reader
+	mt int
 }
 
 // Environment ...
 type Environment struct {
-	DB  GatewayDB
-	Log zerolog.Logger
+	Server Server
+	Log    zerolog.Logger
 }
 
 // RxContext common uplink/downlink radio fields

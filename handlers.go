@@ -1,7 +1,6 @@
 package basicstation
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -23,6 +22,44 @@ const (
 
 var upgrader = websocket.Upgrader{}
 
+// GatewayHandler is the Basic Station HTTP handler
+type GatewayHandler struct {
+	Env *Environment
+}
+
+func (gh GatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	var gw Gateway
+	var err error
+
+	vars := mux.Vars(r)
+	v, ok := vars["eui"]
+	if !ok {
+		gh.Env.Log.Debug().
+			Str("uri", r.RequestURI).
+			Msg("malformed muxs request uri")
+	}
+
+	if gw.EUI, err = lorawan.NewEUI(v); err != nil {
+		gh.Env.Log.Debug().
+			Err(err).
+			Str("eui", v).
+			Msg("parse eui from url failed")
+		return
+	}
+
+	gw.conn, err = upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		gh.Env.Log.Warn().
+			Err(err).
+			Str("eui", gw.Name).
+			Msg("websocket upgrade failed")
+		return
+	}
+
+	// Pass gateway to the server to do with it as it pleases
+	gh.Env.Server.NewConnection(&gw)
+}
+
 // DiscoveryResponse represents a discovery response message
 type DiscoveryResponse struct {
 	Router string `json:"router,omitempty"`
@@ -36,12 +73,12 @@ type DiscoveryHandler struct {
 	Env *Environment
 }
 
-func (dh DiscoveryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func (handler DiscoveryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	var response DiscoveryResponse
 
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		dh.Env.Log.Error().Err(err).Msg("discovery websocket upgrader")
+		handler.Env.Log.Error().Err(err).Msg("discovery websocket upgrader")
 		return
 	}
 	defer conn.Close()
@@ -52,249 +89,53 @@ func (dh DiscoveryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	_, reader, err := conn.NextReader()
 	if err != nil {
-		dh.Env.Log.Error().Err(err).Msg("discovery websocket next reader")
+		handler.Env.Log.Error().Err(err).Msg("discovery websocket next reader")
 		return
 	}
 
-	msg, err := decodeToMap(reader)
+	msg, err := handler.decode(reader)
 	if err != nil {
-		dh.Env.Log.Warn().Err(err).Msg("discovery decode json")
+		handler.Env.Log.Warn().Err(err).Msg("discovery decode json")
 		return
 	}
 
 	// Extract EUI from the request
+	var eui lorawan.EUI
 	for k, v := range msg {
 		switch k {
 		case "router", "Router":
-			var ok bool
-			response.Router, ok = v.(string)
-			if !ok {
+			eui, err = lorawan.NewEUI(v)
+			if err != nil {
 				response.Error = "Missing router field"
 				conn.WriteJSON(&response)
-				dh.Env.Log.Warn().Err(err).Msg("discovery request get eui")
+				handler.Env.Log.Warn().Err(err).Msg("discovery request get eui")
 				return
 			}
+			response.Router = eui.String()
 		default:
-			dh.Env.Log.Warn().Err(err).Msg("discovery request no eui")
+			handler.Env.Log.Warn().Err(err).Msg("discovery request no eui")
 			return
 		}
 	}
 
-	eui, err := lorawan.NewEUI(response.Router)
-	if err != nil {
-		dh.Env.Log.Warn().Err(err).Str("eui", response.Router).Msg("parse router id failed")
-	} else {
-		gw, err := dh.Env.DB.Get(eui.Uint64())
-		if err == nil {
-			response, err = gw.GetDiscoveryResponse()
-		}
-	}
-
-	if err != nil {
-		response.Error = err.Error()
-	}
+	response, err = handler.Env.Server.GetDiscoveryResponse(eui.Uint64(), r)
 
 	// Write response
 	writer, err := conn.NextWriter(websocket.TextMessage)
 	defer writer.Close()
 
 	if err != nil {
-		dh.Env.Log.Error().Err(err).Msg("discovery next writer")
+		handler.Env.Log.Error().Err(err).Msg("discovery next writer")
 		return
 	}
 
 	enc := json.NewEncoder(writer)
 	if err = enc.Encode(&response); err != nil {
-		dh.Env.Log.Error().Err(err).Msg("send discovery response")
+		handler.Env.Log.Error().Err(err).Msg("send discovery response")
 	}
 }
 
-// GatewayHandler is the Basic Station connection HTTP handler
-type GatewayHandler struct {
-	Env *Environment
-}
-
-func (gh GatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-
-	vars := mux.Vars(r)
-	v, ok := vars["eui"]
-	if !ok {
-		gh.Env.Log.Debug().
-			Str("uri", r.RequestURI).
-			Msg("malformed muxs request uri")
-	}
-
-	// Start station protocol runner
-	eui, err := lorawan.NewEUI(v)
-
-	gw, err := gh.Env.DB.Get(eui.Uint64())
-	if err != nil {
-		return
-	}
-
-	// Upgrade to websocket
-	ws, err := upgrader.Upgrade(w, r, nil)
-	if err != nil {
-		gh.Env.Log.Warn().
-			Err(err).
-			Str("eui", eui.String()).
-			Msg("websocket upgrade failed")
-		return
-	}
-	defer ws.Close()
-
-	gwh := gwHandler{
-		eui: eui.Uint64(),
-		gw:  gw,
-		env: gh.Env,
-		ws:  ws,
-	}
-	gwh.run()
-}
-
-// gwHandler implements the basic station connection handler read/write functionality
-type gwHandler struct {
-	eui uint64
-	gw  Gateway
-	env *Environment
-	ws  *websocket.Conn
-}
-
-func (h gwHandler) run() error {
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	err := h.readVersion(ctx)
-	if err != nil {
-		return err
-	}
-
-	// Read configuration
-	conf, err := h.gw.GetRouterConf()
-	if err != nil {
-		return err
-	}
-
-	// Get writer
-	outbound, err := h.ws.NextWriter(websocket.TextMessage)
-	if err != nil {
-		return err
-	}
-
-	// Encode to writer
-	enc := json.NewEncoder(outbound)
-	err = enc.Encode(&conf)
-	if err != nil {
-		return err
-	}
-	// Close does the actual send
-	outbound.Close()
-
-	// Start websocket writer goroutine
-	go h.writer(ctx)
-
-	// Read loop
-	for {
-		mt, inbound, err := h.ws.NextReader()
-		if err != nil {
-			h.env.Log.Debug().
-				Uint64("eui", h.eui).
-				Err(err).
-				Msg("websocket next reader error")
-
-			return err
-		}
-
-		switch mt {
-		case websocket.TextMessage:
-			h.readText(inbound)
-		case websocket.CloseMessage:
-			h.env.Log.Debug().
-				Uint64("eui", h.eui).
-				Msg("received websocket close message")
-			return nil
-		default:
-		}
-	}
-}
-
-func (h gwHandler) readText(r io.Reader) error {
-
-	// Read the message
-	msg, err := decode(r)
-	if err != nil {
-		h.env.Log.Error().
-			Err(err).
-			Str("service", "muxs").
-			Uint64("eui", h.eui).
-			Msg("readText decode message failed")
-
-		return err
-	}
-
-	h.gw.Receive(msg)
-
-	return nil
-}
-
-func (h gwHandler) readVersion(ctx context.Context) error {
-	var version Version
-
-	// Set a short initial read deadline to abort the connection if version is not soon received
-	h.ws.SetReadDeadline(time.Now().Add(5 * time.Second))
-	// Reset read deadline to no timeout
-	defer h.ws.SetReadDeadline(time.Time{})
-
-	// Read version
-	_, inbound, err := h.ws.NextReader()
-	if err != nil {
-		return err
-	}
-
-	dec := json.NewDecoder(inbound)
-	if err = dec.Decode(&version); err != nil {
-		return err
-	}
-
-	h.gw.SetVersion(version)
-
-	return nil
-}
-
-func (h gwHandler) writer(ctx context.Context) {
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		}
-		/*
-			select {
-			case r := <-conn.WriteChan:
-				var w io.WriteCloser
-
-				w, err = ws.NextWriter(websocket.TextMessage)
-				if _, err = io.Copy(w, r); err != nil {
-					service.log.Debug().
-						Str("eui", eui.String()).
-						Err(err).
-						Msg("write to connection")
-
-					return
-				}
-				w.Close()
-
-			case <-ctx.Done():
-				return
-			}
-		*/
-	}
-}
-
-// read reads a JSON-encoded message from the reader and stores the
-// value in v
-func decodeToMap(r io.Reader) (map[string]interface{}, error) {
+func (handler DiscoveryHandler) decode(r io.Reader) (map[string]interface{}, error) {
 	var syntaxError *json.SyntaxError
 	var unmarshalTypeError *json.UnmarshalTypeError
 	var msg string
