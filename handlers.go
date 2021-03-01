@@ -39,19 +39,20 @@ func (gh GatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			Msg("malformed muxs request uri")
 	}
 
-	if gw.EUI, err = lorawan.NewEUI(v); err != nil {
+	eui, err := lorawan.NewEUI(v)
+	if err != nil {
 		gh.Env.Log.Debug().
 			Err(err).
 			Str("eui", v).
 			Msg("parse eui from url failed")
 		return
 	}
+	gw.EUI = eui.Uint64()
 
 	gw.conn, err = upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		gh.Env.Log.Warn().
 			Err(err).
-			Str("eui", gw.Name).
 			Msg("websocket upgrade failed")
 		return
 	}

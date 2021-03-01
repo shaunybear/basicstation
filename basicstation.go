@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
 
 	"github.com/mitchellh/mapstructure"
 	"github.com/rs/zerolog"
@@ -14,6 +15,12 @@ import (
 type DataDown struct {
 	r  io.Reader
 	mt int
+}
+
+// Server is anything that implements a server interface
+type Server interface {
+	NewConnection(gw *Gateway)
+	GetDiscoveryResponse(eui uint64, r *http.Request) (DiscoveryResponse, error)
 }
 
 // Environment ...

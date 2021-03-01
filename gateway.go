@@ -5,12 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"net/http"
 	"time"
 
 	"github.com/gorilla/websocket"
-	"github.com/rs/zerolog"
-	lorawan "github.com/shaunybear/lorawango"
 )
 
 // Stats provides some basic statistics
@@ -25,24 +22,27 @@ type Stats struct {
 
 // Gateway will be the next gateway interface
 type Gateway struct {
-	EUI        lorawan.EUI
-	Name       string
+	EUI        uint64
 	conn       *websocket.Conn
 	Version    Version
 	RouterConf RouterConf
 	Stats      Stats
 }
 
-// Server is anything that implements gateway server interface
-type Server interface {
-	NewConnection(gw *Gateway)
+// Logger interface
+type Logger interface {
+	Error(eui uint64, err error, msg string)
+	Debug(eui uint64, msg string, err error)
+}
+
+// Handler is anything that implements gateway handler interface
+type Handler interface {
 	Receive(gw *Gateway, msg interface{})
 	GetRouterConf(gw *Gateway) error
-	GetDiscoveryResponse(eui uint64, r *http.Request) (DiscoveryResponse, error)
 }
 
 // Run ...
-func (gw *Gateway) Run(ctx context.Context, server Server, log zerolog.Logger) error {
+func (gw *Gateway) Run(ctx context.Context, handler Handler, log Logger) error {
 	var err error
 
 	// Close the connection on exit
@@ -50,16 +50,12 @@ func (gw *Gateway) Run(ctx context.Context, server Server, log zerolog.Logger) e
 
 	// First message from the gateway is it's version information
 	if err = gw.readVersion(ctx); err != nil {
-		log.Debug().
-			Str("eui", gw.Name).
-			Err(err).
-			Msg("read version failed")
-
+		log.Error(gw.EUI, err, "read version failed")
 		return err
 	}
 
 	// Get router configuration from the server
-	if err = server.GetRouterConf(gw); err != nil {
+	if err = handler.GetRouterConf(gw); err != nil {
 		return err
 	}
 
@@ -67,6 +63,7 @@ func (gw *Gateway) Run(ctx context.Context, server Server, log zerolog.Logger) e
 	outbound, err := gw.conn.NextWriter(websocket.TextMessage)
 	if err != nil {
 		// websocket closed
+		log.Debug(gw.EUI, "websocket closed", nil)
 		return err
 	}
 
@@ -83,10 +80,7 @@ func (gw *Gateway) Run(ctx context.Context, server Server, log zerolog.Logger) e
 		for {
 			mt, inbound, err := gw.conn.NextReader()
 			if err != nil {
-				log.Debug().
-					Str("eui", gw.Name).
-					Err(err).
-					Msg("websocket next reader error")
+				log.Debug(gw.EUI, "websocket reader detected close", nil)
 				return
 			}
 
@@ -95,23 +89,16 @@ func (gw *Gateway) Run(ctx context.Context, server Server, log zerolog.Logger) e
 				msg, err := decode(inbound)
 				if err != nil {
 					gw.Stats.DecodeErrors++
-					log.Error().
-						Err(err).
-						Str("eui", gw.Name).
-						Msg(" decode message failed")
+					log.Error(gw.EUI, err, "decode message failed")
 					continue
 				}
-				server.Receive(gw, msg)
+				handler.Receive(gw, msg)
 			case websocket.BinaryMessage:
 				// Binary data sent by RPC sessions
 				gw.Stats.RecvBinaryMsg++
-				log.Debug().
-					Str("eui", gw.Name).
-					Msg("received websocket binary data")
+				log.Debug(gw.EUI, "received websocket binary data", nil)
 			case websocket.CloseMessage:
-				log.Debug().
-					Str("eui", gw.Name).
-					Msg("received websocket close message")
+				log.Debug(gw.EUI, "received websocket close", nil)
 				return
 			default:
 			}
