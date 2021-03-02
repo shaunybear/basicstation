@@ -31,9 +31,9 @@ type Environment struct {
 
 // RxContext common uplink/downlink radio fields
 type RxContext struct {
-	RCTX    int64 `json:"rctx"`
-	XTime   int64 `json:"xtime"`
-	GPSTime int64 `json:"gpstime"`
+	RCTX    int64   `json:"rctx"`
+	XTime   int64   `json:"xtime"`
+	GPSTime float64 `json:"gpstime"`
 }
 
 // Version message reports version infomration to the LNS
@@ -85,17 +85,19 @@ type Uplink struct {
 
 // Downlink encodes a downlink frame
 type Downlink struct {
-	DevEui   string
-	PDU      string `json:"pdu"`
-	RxDelay  int
-	RX1DR    int
-	RX1Freq  int
-	RX2DR    int
-	RX2Freq  int
-	Priority int
-	Xtime    int64  `json:"xtime"`
-	Rxtx     int64  `json:"rctx"`
-	MsgType  string `json:"msgtype"`
+	MsgType     string `json:"msgtype"`
+	DeviceClass int    `json:"dC"`
+	DevEui      string `json:",omitempty"`
+	DIID        int64  `json:"diid"`
+	PDU         string `json:"pdu"`
+	RxDelay     int
+	RX1DR       int   `json:",omitempty"`
+	RX1Freq     int   `json:",omitempty"`
+	RX2DR       int   `json:",omitempty"`
+	RX2Freq     int   `json:",omitempty"`
+	Priority    int   `json:"priority"`
+	Xtime       int64 `json:"xtime"`
+	Rctx        int64 `json:"rctx"`
 }
 
 // Implement io.Reader interface
@@ -107,7 +109,7 @@ func (uplink Uplink) Read(b []byte) (int, error) {
 // DnTxed is the basic station transmit confirmation message
 type DnTxed struct {
 	DIID   int64     `json:"diid"`
-	DevEUI uint64    `json:"DevEui"`
+	DevEUI string    `json:"DevEui"`
 	TXTime float64   `json:"txtime"`
 	RCtx   RxContext `mapstructure:",squash"`
 }
@@ -158,10 +160,10 @@ type RouterConf struct {
 	Region      string   `json:"region"`
 	HWSPEC      string   `json:"hwspec"`
 	FreqRange   []uint   `json:"freq_range,omitempty"`
-	SX1301s     []SX1301 `json:"SX1301_conf,omitempty"`
-	NOCCA       bool     `json:"nocca"`
-	NODC        bool     `json:"nodc"`
-	NODWELL     bool     `json:"nodwell"`
+	SX1301s     []SX1301 `json:"sx1301_conf,omitempty"`
+	NOCCA       bool     `json:"nocca,omitempty"`
+	NODC        bool     `json:"nodc,omitempty"`
+	NODWELL     bool     `json:"nodwell,omitempty"`
 }
 
 // UnsupportedMsgType error
@@ -185,6 +187,7 @@ func decode(r io.Reader) (interface{}, error) {
 	var output interface{}
 
 	dec := json.NewDecoder(r)
+	dec.UseNumber()
 	err := dec.Decode(&input)
 	if err != nil {
 		return nil, err

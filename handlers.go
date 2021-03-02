@@ -56,6 +56,7 @@ func (gh GatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			Msg("websocket upgrade failed")
 		return
 	}
+	defer gw.conn.Close()
 
 	// Pass gateway to the server to do with it as it pleases
 	gh.Env.Server.NewConnection(&gw)

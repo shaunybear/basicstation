@@ -75,18 +75,26 @@ func (gw *Gateway) Run(ctx context.Context, handler Handler, log Logger) error {
 	// Closing the writer does the send
 	outbound.Close()
 
+	done := make(chan bool)
+
 	// Read message loop
 	go func() {
 		for {
-			mt, inbound, err := gw.conn.NextReader()
+			var mt int
+			var inbound io.Reader
+
+			mt, inbound, err = gw.conn.NextReader()
 			if err != nil {
 				log.Debug(gw.EUI, "websocket reader detected close", nil)
+				done <- true
 				return
 			}
 
 			switch mt {
 			case websocket.TextMessage:
-				msg, err := decode(inbound)
+				var msg interface{}
+
+				msg, err = decode(inbound)
 				if err != nil {
 					gw.Stats.DecodeErrors++
 					log.Error(gw.EUI, err, "decode message failed")
@@ -98,32 +106,34 @@ func (gw *Gateway) Run(ctx context.Context, handler Handler, log Logger) error {
 				gw.Stats.RecvBinaryMsg++
 				log.Debug(gw.EUI, "received websocket binary data", nil)
 			case websocket.CloseMessage:
-				log.Debug(gw.EUI, "received websocket close", nil)
+				err = errors.New("received websocket close")
+				log.Debug(gw.EUI, "lost connection", err)
 				return
 			default:
 			}
 		}
 	}()
 
-	<-ctx.Done()
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-done:
+			return err
+		}
+	}
 
 	return err
 }
 
-// WriteText writes websocket text message to gateway
-func (gw Gateway) WriteText(r io.Reader) error {
+// WriteJSON writes json encoded message to websocket
+func (gw Gateway) WriteJSON(msg interface{}) error {
 	if gw.conn == nil {
 		gw.Stats.WriteNoConnError++
 		return errors.New("no connection")
 	}
 
-	w, err := gw.conn.NextWriter(websocket.TextMessage)
-	if err != nil {
-		return err
-	}
-
-	_, err = io.Copy(w, r)
-
+	err := gw.conn.WriteJSON(msg)
 	if err != nil {
 		gw.Stats.WriteTextError++
 	} else {
