@@ -43,7 +43,7 @@ func (gh GatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		gh.Env.Log.Debug().
 			Err(err).
-			Str("eui", v).
+			Str("gweui", v).
 			Msg("parse eui from url failed")
 		return
 	}
