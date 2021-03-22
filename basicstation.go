@@ -11,12 +11,6 @@ import (
 	"github.com/rs/zerolog"
 )
 
-// DataDown message
-type DataDown struct {
-	r  io.Reader
-	mt int
-}
-
 // Server is anything that implements a server interface
 type Server interface {
 	NewConnection(gw *Gateway)
@@ -98,12 +92,6 @@ type Downlink struct {
 	Priority    int   `json:"priority"`
 	Xtime       int64 `json:"xtime"`
 	Rctx        int64 `json:"rctx"`
-}
-
-// Implement io.Reader interface
-func (uplink Uplink) Read(b []byte) (int, error) {
-	b, err := json.Marshal(&uplink)
-	return len(b), err
 }
 
 // DnTxed is the basic station transmit confirmation message
