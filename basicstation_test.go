@@ -1,6 +1,7 @@
 package basicstation
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -12,7 +13,6 @@ import (
 
 	"github.com/gorilla/mux"
 	"github.com/gorilla/websocket"
-	"github.com/rs/zerolog"
 )
 
 // Repository interface ..
@@ -21,7 +21,6 @@ type testServer struct {
 	conf      RouterConf
 	discovery DiscoveryResponse
 	version   Version
-	log       zerolog.Logger
 }
 
 func (s testServer) GetRouterConf(gw *Gateway) error {
@@ -33,14 +32,20 @@ func (s testServer) GetDiscoveryResponse(eui uint64, r *http.Request) (Discovery
 	return s.discovery, nil
 }
 
+func (s testServer) Error(eui uint64, err error, msg string) {
+
+}
+
+func (s testServer) Debug(eui uint64, msg string, err error) {
+
+}
+
 func (s testServer) NewConnection(gw *Gateway) {
 	ctx, _ := context.WithTimeout(context.Background(), 5*time.Second)
-	gw.Run(ctx, s, s.log)
-	return
+	gw.Run(ctx, s, s)
 }
 
 func (s testServer) Receive(gw *Gateway, msg interface{}) {
-	return
 }
 
 func (s testServer) SetVersion(eui uint64, v Version) {
@@ -147,6 +152,34 @@ func TestStationRouterConf(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestUplink(t *testing.T) {
+
+	// DevAddr is encoded as an int32, check mapstructure does not error on negative values
+	devaddrs := []int32{-1, 100}
+	m := map[string]interface{}{
+		"msgtype": "updf",
+	}
+
+	for _, wantDevAddr := range devaddrs {
+		m["DevAddr"] = wantDevAddr
+
+		b := bytes.Buffer{}
+		enc := json.NewEncoder(&b)
+		enc.Encode(&m)
+
+		value, err := decode(&b)
+		if err != nil {
+			t.Errorf("Decode uplink devaddr=%d failed", wantDevAddr)
+		}
+
+		gotDevAddr := value.(Uplink).DevAddr
+		if gotDevAddr != wantDevAddr {
+			t.Errorf("uplink devAddr got=%d, want=%d", gotDevAddr, wantDevAddr)
+		}
+	}
+
 }
 
 func newDiscoveryWSServer(t *testing.T, h http.Handler) (*httptest.Server, *websocket.Conn) {

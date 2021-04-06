@@ -64,7 +64,7 @@ type JoinRequest struct {
 // Uplink encodes an uplink frame
 type Uplink struct {
 	MHdr       uint8
-	DevAddr    uint32
+	DevAddr    int32
 	FCtrl      uint8
 	FCnt       uint16
 	FOpts      string
@@ -186,9 +186,9 @@ func decode(r io.Reader) (interface{}, error) {
 		return nil, fmt.Errorf("no msgtype in %v", input)
 	}
 
-	switch mt.(type) {
+	switch mt := mt.(type) {
 	case string:
-		switch mt.(string) {
+		switch mt {
 		case "jreq":
 			output = JoinRequest{}
 		case "updf":
@@ -200,7 +200,7 @@ func decode(r io.Reader) (interface{}, error) {
 		case "propdf":
 			// ignore
 		default:
-			err := UnsupportedMsgType{mtype: string(mt.(string))}
+			err := UnsupportedMsgType{mtype: string(mt)}
 			return nil, err
 		}
 	default:
