@@ -116,6 +116,12 @@ type LoraStdChannel struct {
 	SpreadingFactor int `json:"spread_factor"`
 }
 
+type FSKChannel struct {
+	RadioChannel
+	Bandwidth int `json:"bandwidth"`
+	Datarate  int `json:"datarate"`
+}
+
 // Radio is an SX1301 radio configuration
 type Radio struct {
 	Enable bool   `json:"enable"`
@@ -135,7 +141,7 @@ type SX1301 struct {
 	Channel6    RadioChannel   `json:"chan_multiSF_6"`
 	Channel7    RadioChannel   `json:"chan_multiSF_7"`
 	ChannelLora LoraStdChannel `json:"chan_Lora_std"`
-	ChannelFSK  RadioChannel   `json:"chan_FSK"`
+	ChannelFSK  FSKChannel     `json:"chan_FSK"`
 }
 
 // RouterConf message specifies a channelplan for the station and defines
