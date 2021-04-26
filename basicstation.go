@@ -158,6 +158,7 @@ type RouterConf struct {
 	NOCCA       bool     `json:"nocca,omitempty"`
 	NODC        bool     `json:"nodc,omitempty"`
 	NODWELL     bool     `json:"nodwell,omitempty"`
+	MaxEIRP     *int     `json:"max_eirp,omitempty"`
 }
 
 // UnsupportedMsgType error
