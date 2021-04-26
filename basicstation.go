@@ -85,10 +85,10 @@ type Downlink struct {
 	DIID        int64  `json:"diid"`
 	PDU         string `json:"pdu"`
 	RxDelay     int
-	RX1DR       int   `json:",omitempty"`
-	RX1Freq     int   `json:",omitempty"`
-	RX2DR       int   `json:",omitempty"`
-	RX2Freq     int   `json:",omitempty"`
+	RX1DR       *int  `json:",omitempty"`
+	RX1Freq     *int  `json:",omitempty"`
+	RX2DR       *int  `json:",omitempty"`
+	RX2Freq     *int  `json:",omitempty"`
 	Priority    int   `json:"priority"`
 	Xtime       int64 `json:"xtime"`
 	Rctx        int64 `json:"rctx"`
