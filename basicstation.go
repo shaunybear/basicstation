@@ -118,8 +118,8 @@ type LoraStdChannel struct {
 
 type FSKChannel struct {
 	RadioChannel
-	Bandwidth int `json:"bandwidth"`
-	Datarate  int `json:"datarate"`
+	Bandwidth int `json:"bandwidth,omitempty"`
+	Datarate  int `json:"datarate,omitempty"`
 }
 
 // Radio is an SX1301 radio configuration
