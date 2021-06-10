@@ -6,6 +6,6 @@ require (
 	github.com/gorilla/mux v1.8.0
 	github.com/gorilla/websocket v1.4.2
 	github.com/mitchellh/mapstructure v1.4.1
-	github.com/rs/zerolog v1.20.0
-	github.com/shaunybear/lorawango v0.0.0-20210218232520-a31fa3c3903b
+	github.com/rs/zerolog v1.22.0
+	github.com/shaunybear/lorawango v0.0.0-20210428121225-87a347d3fff1
 )
