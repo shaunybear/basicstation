@@ -112,8 +112,8 @@ type RadioChannel struct {
 // LoraStdChannel is a Radio channel with additional parameters
 type LoraStdChannel struct {
 	RadioChannel
-	Bandwidth       int `json:"bandwidth"`
-	SpreadingFactor int `json:"spread_factor"`
+	Bandwidth       int `json:"bandwidth,omitempty"`
+	SpreadingFactor int `json:"spread_factor,omitempty"`
 }
 
 type FSKChannel struct {
@@ -154,7 +154,7 @@ type RouterConf struct {
 	Region      string   `json:"region"`
 	HWSPEC      string   `json:"hwspec"`
 	FreqRange   []uint   `json:"freq_range,omitempty"`
-	SX1301s     []SX1301 `json:"sx1301_conf,omitempty"`
+	SX1301s     []SX1301 `json:"sx1301_conf"`
 	NOCCA       bool     `json:"nocca,omitempty"`
 	NODC        bool     `json:"nodc,omitempty"`
 	NODWELL     bool     `json:"nodwell,omitempty"`
